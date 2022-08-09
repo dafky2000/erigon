@@ -22,12 +22,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/state22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -71,8 +73,10 @@ type ReconWorker struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
-	epoch        epochReader
-	chain        chainReader
+	epoch        state22.EpochReader
+	chain        state22.ChainReader
+	isPoSA       bool
+	posa         consensus.PoSA
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
@@ -95,8 +99,9 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		genesis:      genesis,
 		engine:       engine,
 	}
-	rw.epoch = epochReader{tx: chainTx}
-	rw.chain = chainReader{config: chainConfig, tx: chainTx, blockReader: blockReader}
+	rw.epoch = state22.NewEpochReader(chainTx)
+	rw.chain = state22.NewChainReader(chainConfig, chainTx, blockReader)
+	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
 
@@ -136,6 +141,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
@@ -154,14 +160,16 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		if rw.isPoSA {
+			systemcontracts.UpgradeBuildInSystemContract(chainConfig, txTask.Header.Number, ibs)
+		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
-		posa, isPoSA := rw.engine.(consensus.PoSA)
-		if isPoSA {
-			if isSystemTx, err := posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+		if rw.isPoSA {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
@@ -617,6 +625,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 						if err != nil {
 							return err
 						}
+						defer func() {
+							if rwTx != nil {
+								rwTx.Rollback()
+							}
+						}()
 						if err = rs.Flush(rwTx); err != nil {
 							return err
 						}
@@ -860,6 +873,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 	if err = plainStateCollector.Load(rwTx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}

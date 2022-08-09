@@ -218,7 +218,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	//limiter := make(chan struct{}, kv.ReadersLimit)
@@ -398,7 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, *config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
 		if err != nil {
 			return err
 		}
@@ -509,7 +508,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		headCh = make(chan *types.Block, 1)
 	}
 	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
 	if err != nil {
 		return nil, err
 	}

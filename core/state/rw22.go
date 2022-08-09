@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
-	"sort"
 	"sync"
 	"unsafe"
 
@@ -305,7 +304,8 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	for addr := range txTask.BalanceIncreaseSet {
+		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
 			var err error
@@ -513,8 +513,6 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -583,9 +581,6 @@ func (w *StateWriter22) ResetWriteSet() {
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
-	for _, list := range w.writeLists {
-		sort.Sort(list)
-	}
 	return w.writeLists
 }
 
@@ -651,14 +646,12 @@ func (w *StateWriter22) CreateContract(address common.Address) error {
 }
 
 type StateReader22 struct {
-	tx         kv.Tx
-	txNum      uint64
-	trace      bool
-	rs         *State22
-	readError  bool
-	stateTxNum uint64
-	composite  []byte
-	readLists  map[string]*KvList
+	tx        kv.Tx
+	txNum     uint64
+	trace     bool
+	rs        *State22
+	composite []byte
+	readLists map[string]*KvList
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
@@ -691,9 +684,6 @@ func (r *StateReader22) ResetReadSet() {
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
-	for _, list := range r.readLists {
-		sort.Sort(list)
-	}
 	return r.readLists
 }
 
