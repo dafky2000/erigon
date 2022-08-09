@@ -138,7 +138,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		addrBitmap = roaring.Or(addrBitmap, m)
 	}
 
-	if addrBitmap != nil && topicsBitmap != nil {
+	if len(crit.Addresses) > 0 || len(crit.Topics) > 0 {
 		borIter := blockNumbers.Iterator()
 
 		for borIter.HasNext() {
