@@ -138,25 +138,27 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		addrBitmap = roaring.Or(addrBitmap, m)
 	}
 
-	borIter := blockNumbers.Iterator()
+	if addrBitmap != nil && topicsBitmap != nil {
+		borIter := blockNumbers.Iterator()
 
-	for borIter.HasNext() {
-		blockNum := uint64(borIter.Next())
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
+		for borIter.HasNext() {
+			blockNum := uint64(borIter.Next())
+			blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
 
-		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNum, 0, 0)
-		if borLogs != nil {
-			filtered := filterLogs(borLogs, crit.Addresses, crit.Topics)
-			if len(filtered) > 0 {
-				borBitmap := roaring.BitmapOf(uint32(blockNum))
-				if addrBitmap == nil {
-					addrBitmap = borBitmap
-				} else {
-					// Only need to add to address bitmap since the topic bitmap returns correctly
-					addrBitmap = roaring.Or(addrBitmap, borBitmap)
+			borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNum, 0, 0)
+			if borLogs != nil {
+				filtered := filterLogs(borLogs, crit.Addresses, crit.Topics)
+				if len(filtered) > 0 {
+					borBitmap := roaring.BitmapOf(uint32(blockNum))
+					if addrBitmap == nil {
+						addrBitmap = borBitmap
+					} else {
+						// Only need to add to address bitmap since the topic bitmap returns correctly
+						addrBitmap = roaring.Or(addrBitmap, borBitmap)
+					}
 				}
 			}
 		}
