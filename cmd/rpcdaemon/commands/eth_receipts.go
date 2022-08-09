@@ -124,9 +124,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if err != nil {
 		return nil, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
 
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
@@ -139,6 +136,34 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			continue
 		}
 		addrBitmap = roaring.Or(addrBitmap, m)
+	}
+
+	borIter := blockNumbers.Iterator()
+
+	for borIter.HasNext() {
+		blockNum := uint64(borIter.Next())
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNum, 0, 0)
+		if borLogs != nil {
+			filtered := filterLogs(borLogs, crit.Addresses, crit.Topics)
+			if len(filtered) > 0 {
+				borBitmap := roaring.BitmapOf(uint32(blockNum))
+				if addrBitmap == nil {
+					addrBitmap = borBitmap
+				} else {
+					// Only need to add to address bitmap since the topic bitmap returns correctly
+					addrBitmap = roaring.Or(addrBitmap, borBitmap)
+				}
+			}
+		}
+	}
+
+	if topicsBitmap != nil {
+		blockNumbers.And(topicsBitmap)
 	}
 
 	if addrBitmap != nil {
@@ -183,34 +208,33 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if err != nil {
 			return logs, err
 		}
-		if len(blockLogs) == 0 {
-			continue
-		}
 
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
 
-		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-		if err != nil {
-			return nil, err
+		if len(blockLogs) > 0 {
+			body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+			if err != nil {
+				return nil, err
+			}
+			if body == nil {
+				return nil, fmt.Errorf("block not found %d", blockNumber)
+			}
+			for _, log := range blockLogs {
+				log.BlockNumber = blockNumber
+				log.BlockHash = blockHash
+				log.TxHash = body.Transactions[log.TxIndex].Hash()
+			}
+			logs = append(logs, blockLogs...)
 		}
-		if body == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
-		}
-		for _, log := range blockLogs {
-			log.BlockNumber = blockNumber
-			log.BlockHash = blockHash
-			log.TxHash = body.Transactions[log.TxIndex].Hash()
-		}
-		logs = append(logs, blockLogs...)
 
 		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
 		if borLogs != nil {
-			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
-			if len(borLogs) > 0 {
-				logs = append(logs, borLogs...)
+			filtered := filterLogs(borLogs, crit.Addresses, crit.Topics)
+			if len(filtered) > 0 {
+				logs = append(logs, filtered...)
 			}
 		}
 	}
