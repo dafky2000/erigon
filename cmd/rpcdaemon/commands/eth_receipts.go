@@ -153,11 +153,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 				filtered := filterLogs(borLogs, crit.Addresses, crit.Topics)
 				if len(filtered) > 0 {
 					borBitmap := roaring.BitmapOf(uint32(blockNum))
-					if addrBitmap == nil {
-						addrBitmap = borBitmap
+
+					// Add to the topics and addr bitmaps to ensure we don't lose these blockNumbers
+					if topicsBitmap != nil {
+						topicsBitmap = roaring.Or(topicsBitmap, borBitmap)
 					} else {
-						// Only need to add to address bitmap since the topic bitmap returns correctly
+						topicsBitmap = borBitmap
+					}
+					if addrBitmap != nil {
 						addrBitmap = roaring.Or(addrBitmap, borBitmap)
+					} else {
+						addrBitmap = borBitmap
 					}
 				}
 			}
